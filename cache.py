@@ -1,60 +1,45 @@
 import json
 import os
-import time
+import re
 
 CACHE_FILE = "cache.json"
-CACHE = {}
 
-def load_cache():
-    global CACHE
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                CACHE = json.load(f)
-        except:
-            CACHE = {}
-    return CACHE
+def _load():
+    try:
+        with open(CACHE_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
-def save_cache():
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(CACHE, f, indent=2)
+def _save(data):
+    with open(CACHE_FILE, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=4, ensure_ascii=False)
 
-def get(key):
-    load_cache()
-    key = key.lower().strip()
-    if key in CACHE:
-        item = CACHE[key]
-        # Check if expired
-        if time.time() - item["time"] < item["ttl"]:
-            print(f"[CACHE HIT] {key}")
-            return item["value"]
-        else:
-            del CACHE[key]
-            save_cache()
-    return None
+def _normalise(question):
+    return re.sub(r"\s+", " ", question.lower().strip())
 
-def set(key, value, ttl=3600):
-    load_cache()
-    key = key.lower().strip()
-    CACHE[key] = {
-        "value": value,
-        "time": time.time(),
-        "ttl": ttl
-    }
-    save_cache()
-    print(f"[CACHE SAVED] {key}")
-    return value
+def get_cached(question):
+    data = _load()
+    return data.get(_normalise(question))
 
-def clear():
-    global CACHE
-    CACHE = {}
-    if os.path.exists(CACHE_FILE):
-        os.remove(CACHE_FILE)
-    print("Cache cleared")
+def set_cache(question, answer):
+    data = _load()
+    data[_normalise(question)] = answer
+    _save(data)
 
-def stats():
-    load_cache()
-    return {"total_saved": len(CACHE), "keys": list(CACHE.keys())}
-
-# Load on start
-load_cache()
+def is_cacheable(question):
+    q = question.lower()
+    not_cacheable = [
+        "book", "booking", "appointment",
+        "my name", "phone", "071", "072", "073", "074",
+        "075", "076", "077", "078", "079", "254",
+        "i have", "i feel", "my child", "mtoto",
+        "cough", "fever", "headache", "pain", "symptom",
+        "sick", "unwell", "bleeding", "chest"
+    ]
+    if any(word in q for word in not_cacheable):
+        return False
+    if len(q.split()) < 2:
+        return False
+    return True

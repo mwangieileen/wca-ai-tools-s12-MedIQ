@@ -1,235 +1,818 @@
-import os
-import json
-import re
-from datetime import datetime
-from dotenv import load_dotenv
-load_dotenv()
+# main.py
+# MedIQ - Hope Clinic - Virtual Medical Assistant
+# Menu: 1. New session, 2. Past session, 3. View bookings, 4. Exit
+# Language: English / Swahili / Sheng
+# Conversation Memory: FULL list of messages sent with EVERY API call - supports at least 4 turns
+# Saved Session: full conversation + summary saved to samples/session_DATE.md + .json
+
 from google import genai
 from google.genai import types
-from system_propmt import build_prompt, SUMMARY_PROMPT
+from dotenv import load_dotenv
+import os
+import re
+import json
+import uuid
+import socket
+from datetime import datetime, date, time
+from cache import get_cached, set_cache, is_cacheable
+from system_propmt import build_system_prompt, SUMMARY_PROMPT
+from session import Session, list_saved_sessions, load_saved_session, save_to_memory_file
 
-API_KEY = os.getenv("GEMINI_API_KEY")
+KNOWLEDGE_FILE = "knowledge.txt"
+MEMORY_FILE = "memory.txt"
+BOOKINGS_FILE = "bookings.json"
 
-if not API_KEY:
-    print("WARNING: GEMINI_API_KEY not found in .env")
-    client = None
-else:
-    client = genai.Client(api_key=API_KEY)
+ASSISTANT_NAME = "MedIQ"
+CLINIC_NAME = "Hope Clinic"
+CLINIC_PHONE = "0712 345 678"
 
-def load_knowledge():
+load_dotenv()
+api_key = os.getenv("api_key")
+if not api_key:
+    raise ValueError("api_key not found. Check your .env file.")
+
+client = genai.Client(
+    api_key=api_key,
+    http_options=types.HttpOptions(
+        retry_options=types.HttpRetryOptions(attempts=5, initial_delay=1.0, max_delay=30.0)
+    )
+)
+
+try:
+    with open(KNOWLEDGE_FILE, "r", encoding="utf-8") as file:
+        knowledge = file.read()
+except OSError:
+    knowledge = "No knowledge base available."
+
+try:
+    with open(MEMORY_FILE, "r", encoding="utf-8") as file:
+        old_memory = file.read()
+except OSError:
+    old_memory = ""
+    with open(MEMORY_FILE, "w", encoding="utf-8") as file:
+        file.write("")
+
+if old_memory.strip() == "No previous conversation.":
+    old_memory = ""
+    with open(MEMORY_FILE, "w", encoding="utf-8") as file:
+        file.write("")
+if old_memory.strip().startswith("No previous conversation."):
+    lines = old_memory.splitlines()
+    if len(lines) > 1:
+        old_memory = "\n".join(lines[1:]).strip()
+        with open(MEMORY_FILE, "w", encoding="utf-8") as file:
+            file.write(old_memory)
+if not old_memory.strip():
+    old_memory = "No previous conversation."
+
+selected_language = "English"
+
+TEXT = {
+    "English": {
+        "welcome": "MedIQ - Hope Clinic\nYour Virtual Medical Assistant",
+        "choose": "\nPlease choose an option:",
+        "new": "1. New session",
+        "past": "2. Past session",
+        "bookings": "3. View bookings",
+        "exit": "4. Exit",
+        "enter": "Enter choice (1-4): ",
+        "greeting": "Hello! Welcome to Hope Clinic. I'm MedIQ, your virtual medical assistant. How may I help you today?",
+        "back": "Type 'exit' to go back to menu.",
+        "ended": "Session ended. Returning to menu.",
+        "bye": "Take care!",
+        "invalid": "Please enter 1, 2, 3 or 4.",
+        "no_internet": "No internet connection. Please connect to internet to continue.",
+        "retry": "Press Enter to try again, or type 'exit' to go back to menu: ",
+        "internet_back": "Internet connected. You can now continue."
+    },
+    "Swahili": {
+        "welcome": "MedIQ - Hope Clinic\nMsaidizi Wako wa Kiwirtuali",
+        "choose": "\nTafadhali chagua:",
+        "new": "1. Kikao kipya",
+        "past": "2. Kikao kilichopita",
+        "bookings": "3. Angalia bookings",
+        "exit": "4. Toka",
+        "enter": "Weka chaguo (1-4): ",
+        "greeting": "Habari! Karibu Hope Clinic. Mimi ni MedIQ, msaidizi wako. Ninaweza kukusaidiaje leo?",
+        "back": "Andika 'exit' kurudi kwa menu.",
+        "ended": "Kikao kimeisha. Narudi kwa menu.",
+        "bye": "Kuwa na afya njema!",
+        "invalid": "Tafadhali weka 1, 2, 3 au 4.",
+        "no_internet": "Hakuna mtandao. Tafadhali ungana na mtandao ili kuendelea. MedIQ haiwezi kufanya kazi bila mtandao.",
+        "retry": "Bonyeza Enter kujaribu tena, au andika 'exit' kurudi kwa menu: ",
+        "internet_back": "Mtandao umerudi. Sasa unaweza kuendelea."
+    },
+    "Sheng": {
+        "welcome": "MedIQ - Hope Clinic\nMsaidizi Wako",
+        "choose": "\nChagua beste:",
+        "new": "1. Session mpya",
+        "past": "2. Session ilipita",
+        "bookings": "3. Angalia bookings",
+        "exit": "4. Toka",
+        "enter": "Weka chaguo (1-4): ",
+        "greeting": "Sasa beste! Karibu Hope Clinic. Mimi ni MedIQ. Nikusaidie aje leo?",
+        "back": "Andika 'exit' kurudi kwa menu.",
+        "ended": "Session imeisha. Narudi kwa menu.",
+        "bye": "Stay fiti beste!",
+        "invalid": "Weka 1, 2, 3 ama 4.",
+        "no_internet": "Hakuna net beste. Connect kwa net ndio tuendelee. MedIQ haiwezi kufanya kazi bila net.",
+        "retry": "Bonyeza Enter kujaribu tena, ama andika 'exit' kurudi kwa menu: ",
+        "internet_back": "Net imerudi. Sasa unaweza kuendelea."
+    }
+}
+
+BOOKING_TEXT = {
+    "English": {
+        "ask_service": "Of course! What service would you like to book?\nFor example: general consultation, dental care, lab tests or another clinic service.",
+        "ask_doctor": "Do you have a preferred doctor?\nDr Nancy (Monday-Friday, 9 AM-1 PM), Dr Otieno (Monday-Friday, 2 PM-6 PM), or no preference?",
+        "ask_date": "What date would you prefer? Please use DD/MM/YYYY.",
+        "ask_date_child": "Child health appointments are with Dr Nancy Monday to Friday, 9 AM to 1 PM.\nWhat date would you prefer? Please use DD/MM/YYYY.",
+        "ask_date_dental": "Dental appointments are with Dr Wanjiru on Mondays, Wednesdays and Fridays, and should be arranged at least one day in advance.\nWhat date would you prefer? Please use DD/MM/YYYY.",
+        "ask_date_lab": "Which lab test would you like? For example, malaria, blood sugar, typhoid or urine test.",
+        "ask_date_general": "Sure! Let's arrange your appointment. What date would you prefer? Please use DD/MM/YYYY.",
+        "ask_time": "What time would you prefer? For example, 10:00 AM.",
+        "ask_name": "Thank you. May I have the patient's full name?",
+        "ask_phone": "Thank you. What phone number can the clinic use to contact you?",
+        "invalid_phone": "That phone number doesn't look valid. Please enter a Kenyan mobile number, for example 0712345678.",
+        "invalid_date": "Please enter the date in DD/MM/YYYY format, for example 20/11/2026.",
+        "invalid_time": "Please enter a time such as 10:00 AM, 2:00 PM or 14:00.",
+        "invalid_doctor": "Please choose Dr Nancy, Dr Otieno, or say 'no preference'.",
+        "invalid_service": "Which service do you need?\nYou can say general consultation, dental care, lab tests or another clinic service.",
+        "invalid_name": "Please enter the patient's full name.",
+        "confirm": "Please review your appointment request:\n\nName: {name}\nPhone: {phone}\nService: {service}\nDoctor: {doctor}\nDate: {date}\nTime: {time}\n\nWould you like me to submit this request? Please reply YES or NO.",
+        "confirm_lab": "Please review your appointment request:\n\nName: {name}\nPhone: {phone}\nService: {service}\nDoctor: {doctor}\nDate: {date}\nTime: {time}\nLab test: {test}\n\nWould you like me to submit this request? Please reply YES or NO.",
+        "confirmed": "Your appointment has been successfully confirmed!\n\nAppointment ID: {id}\nName: {name}\nService: {service}\nHealthcare provider: {doctor}\nDate: {date}\nTime: {time}\n\nPlease arrive at least 15 minutes before your appointment.\nWe look forward to seeing you at Hope Clinic!",
+        "cancelled": "No problem. I have not submitted the request. How else may I help you?",
+        "stop": "No problem. I've stopped the booking request. How else may I help you?",
+        "confirm_yes_no": "Please reply YES to submit the request or NO to cancel it.",
+        "closed_sunday": "The clinic is closed on Sundays. Please choose another date.",
+        "date_past": "That date has already passed. Please choose a future date.",
+        "time_past": "That time has already passed. Please choose a later time.",
+        "outside_hours": "That time is outside the clinic's regular opening hours. Please choose another time during opening hours.",
+        "dental_advance": "Dental appointments should be arranged at least one day in advance.",
+        "ask_date_other": "What date would you prefer? Please use DD/MM/YYYY. The clinic will confirm the arrangements for this service."
+    },
+    "Swahili": {
+        "ask_service": "Sawa! Huduma gani ungependa ku-book?\nKwa mfano: general consultation, dental care, vipimo vya maabara au huduma nyingine ya kliniki.",
+        "ask_doctor": "Una daktari unayempendelea?\nDr Nancy (Jumatatu-Ijumaa, 9 AM-1 PM), Dr Otieno (Jumatatu-Ijumaa, 2 PM-6 PM), au huna upendeleo?",
+        "ask_date": "Tarehe gani ungependa? Tafadhali tumia DD/MM/YYYY.",
+        "ask_date_child": "Miadi ya afya ya mtoto ni na Dr Nancy Jumatatu hadi Ijumaa, 9 AM hadi 1 PM.\nTarehe gani ungependa? Tafadhali tumia DD/MM/YYYY.",
+        "ask_date_dental": "Miadi ya meno ni na Dr Wanjiru Jumatatu, Jumatano na Ijumaa, na inapaswa kupangwa angalau siku moja kabla.\nTarehe gani ungependa? Tafadhali tumia DD/MM/YYYY.",
+        "ask_date_lab": "Kipimo gani cha maabara ungependa? Kwa mfano, malaria, sukari, typhoid au mkojo.",
+        "ask_date_general": "Sawa! Tupange miadi yako. Tarehe gani ungependa? Tafadhali tumia DD/MM/YYYY.",
+        "ask_time": "Saa ngapi ungependa? Kwa mfano, 10:00 AM.",
+        "ask_name": "Asante. Naomba jina kamili la mgonjwa?",
+        "ask_phone": "Asante. Namba gani ya simu kliniki inaweza kutumia kukuwasiliana nawe?",
+        "invalid_phone": "Namba hiyo ya simu haionekani sahihi. Tafadhali weka namba ya simu ya Kenya, kwa mfano 0712345678.",
+        "invalid_date": "Tafadhali weka tarehe kwa DD/MM/YYYY, kwa mfano 20/11/2026.",
+        "invalid_time": "Tafadhali weka saa kama 10:00 AM, 2:00 PM au 14:00.",
+        "invalid_doctor": "Tafadhali chagua Dr Nancy, Dr Otieno, au sema 'huna upendeleo'.",
+        "invalid_service": "Huduma gani unahitaji?\nUnaweza kusema general consultation, dental care, vipimo vya maabara au huduma nyingine ya kliniki.",
+        "invalid_name": "Tafadhali weka jina kamili la mgonjwa.",
+        "confirm": "Tafadhali hakiki ombi lako la miadi:\n\nJina: {name}\nSimu: {phone}\nHuduma: {service}\nDaktari: {doctor}\nTarehe: {date}\nSaa: {time}\n\nUngependa nitume ombi hili? Tafadhali jibu YES au NO.",
+        "confirm_lab": "Tafadhali hakiki ombi lako la miadi:\n\nJina: {name}\nSimu: {phone}\nHuduma: {service}\nDaktari: {doctor}\nTarehe: {date}\nSaa: {time}\nKipimo: {test}\n\nUngependa nitume ombi hili? Tafadhali jibu YES au NO.",
+        "confirmed": "Miadi yako imethibitishwa!\n\nKitambulisho cha Miadi: {id}\nJina: {name}\nHuduma: {service}\nMtoa huduma: {doctor}\nTarehe: {date}\nSaa: {time}\n\nTafadhali fika angalau dakika 15 kabla ya miadi yako.\nTunatarajia kukuona Hope Clinic!",
+        "cancelled": "Sawa. Sikutuma ombi. Ninaweza kukusaidiaje tena?",
+        "stop": "Sawa. Nimesimamisha ombi la ku-book. Ninaweza kukusaidiaje tena?",
+        "confirm_yes_no": "Tafadhali jibu YES kutuma ombi au NO kulighairi.",
+        "closed_sunday": "Kliniki imefungwa Jumapili. Tafadhali chagua siku nyingine.",
+        "date_past": "Tarehe hiyo imepita. Tafadhali chagua tarehe ya baadaye.",
+        "time_past": "Saa hiyo imepita. Tafadhali chagua saa ya baadaye.",
+        "outside_hours": "Saa hiyo iko nje ya saa za kazi za kliniki. Tafadhali chagua saa nyingine ndani ya saa za kazi.",
+        "dental_advance": "Miadi ya meno inapaswa kupangwa angalau siku moja kabla.",
+        "ask_date_other": "Tarehe gani ungependa? Tafadhali tumia DD/MM/YYYY. Kliniki itathibitisha mipango ya huduma hii."
+    },
+    "Sheng": {
+        "ask_service": "Sawa beste! Service gani unataka ku-book?\nKwa mfano: general consultation, dental care, lab test ama service ingine ya clinic.",
+        "ask_doctor": "Una doc unataka?\nDr Nancy (Mon-Fri, 9 AM-1 PM), Dr Otieno (Mon-Fri, 2 PM-6 PM), ama huna preference?",
+        "ask_date": "Date gani unataka? Tumia DD/MM/YYYY.",
+        "ask_date_child": "Miadi ya mtoto ni na Dr Nancy Mon hadi Fri, 9 AM hadi 1 PM.\nDate gani unataka? Tumia DD/MM/YYYY.",
+        "ask_date_dental": "Miadi ya meno ni na Dr Wanjiru Mon, Wed na Fri, na inafaa ku-book angalau siku moja kabla.\nDate gani unataka? Tumia DD/MM/YYYY.",
+        "ask_date_lab": "Lab test gani unataka? Kwa mfano, malaria, sukari, typhoid ama urine.",
+        "ask_date_general": "Sawa! Tupange miadi yako. Date gani unataka? Tumia DD/MM/YYYY.",
+        "ask_time": "Saa ngapi unataka? Kwa mfano, 10:00 AM.",
+        "ask_name": "Poa. Naomba jina kamili ya mgonjwa?",
+        "ask_phone": "Poa. Namba gani ya simu clinic inaweza kutumia kuku-reach?",
+        "invalid_phone": "Hiyo namba haiko sawa beste. Weka namba ya Kenya, kwa mfano 0712345678.",
+        "invalid_date": "Weka date kwa DD/MM/YYYY, kwa mfano 20/11/2026.",
+        "invalid_time": "Weka saa kama 10:00 AM, 2:00 PM ama 14:00.",
+        "invalid_doctor": "Chagua Dr Nancy, Dr Otieno, ama sema 'huna preference'.",
+        "invalid_service": "Service gani unahitaji?\nUnaweza sema general consultation, dental care, lab test ama service ingine ya clinic.",
+        "invalid_name": "Weka jina kamili ya mgonjwa.",
+        "confirm": "Check ombi yako ya miadi:\n\nJina: {name}\nSimu: {phone}\nService: {service}\nDoc: {doctor}\nDate: {date}\nSaa: {time}\n\nUnataka nitume hii? Jibu YES ama NO.",
+        "confirm_lab": "Check ombi yako ya miadi:\n\nJina: {name}\nSimu: {phone}\nService: {service}\nDoc: {doctor}\nDate: {date}\nSaa: {time}\nLab test: {test}\n\nUnataka nitume hii? Jibu YES ama NO.",
+        "confirmed": "Miadi yako ime-confirm!\n\nAppointment ID: {id}\nJina: {name}\nService: {service}\nDoc: {doctor}\nDate: {date}\nSaa: {time}\n\nFika angalau dakika 15 kabla ya miadi yako.\nTunangoja kukuona Hope Clinic!",
+        "cancelled": "Poa. Sikutuma ombi. Nikusaidie aje tena?",
+        "stop": "Poa. Nime-stop ku-book. Nikusaidie aje tena?",
+        "confirm_yes_no": "Jibu YES kutuma ombi ama NO ku-cancel.",
+        "closed_sunday": "Clinic imefungwa Sunday. Chagua siku ingine.",
+        "date_past": "Hiyo date imepita. Chagua date ya mbele.",
+        "time_past": "Hiyo saa imepita. Chagua saa ya mbele.",
+        "outside_hours": "Hiyo saa iko nje ya masaa ya clinic. Chagua saa ingine ndani ya masaa.",
+        "dental_advance": "Miadi ya meno inafaa ku-book angalau siku moja kabla.",
+        "ask_date_other": "Date gani unataka? Tumia DD/MM/YYYY. Clinic ita-confirm mipango ya hii service."
+    }
+}
+
+MISC_TEXT = {
+    "English": {
+        "emergency": "This may be a medical emergency. Please seek immediate medical attention at the nearest emergency department. Do not wait for a chat response. You may also call Hope Clinic on 0712 345 678 for guidance.",
+        "no_problem": "No problem. How else may I help you?",
+        "how_help": "How may I help you today?"
+    },
+    "Swahili": {
+        "emergency": "Hii inaweza kuwa dharura. Tafadhali tafuta msaada wa dharura mara moja katika hospitali iliyo karibu. Usisubiri jibu la chat. Unaweza pia kupiga Hope Clinic 0712 345 678 kwa mwongozo.",
+        "no_problem": "Sawa. Ninaweza kukusaidiaje tena?",
+        "how_help": "Ninaweza kukusaidiaje leo?"
+    },
+    "Sheng": {
+        "emergency": "Hii inaweza kuwa emergency beste. Enda hosi iliyo karibu sasa hivi. Usingoje jibu la chat. Unaweza pia kupiga Hope Clinic 0712 345 678.",
+        "no_problem": "Poa. Nikusaidie aje tena?",
+        "how_help": "Nikusaidie aje leo?"
+    }
+}
+
+def check_internet():
     try:
-        with open("knowledge.txt", "r", encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        return "No knowledge base found."
+        socket.create_connection(("8.8.8.8", 53), timeout=2)
+        return True
+    except OSError:
+        return False
 
-KNOWLEDGE = load_knowledge()
-MEMORY_FILE = "memory.json"
-BOOKING_FILE = "booking.json"
+def wait_for_internet():
+    t = TEXT[selected_language]
+    while not check_internet():
+        print(f"\nMedIQ: {t['no_internet']}")
+        choice = input(t["retry"]).strip().lower()
+        if choice == "exit":
+            return False
+    print(f"MedIQ: {t['internet_back']}")
+    return True
 
-def clean_json(text):
-    text = text.strip()
-    text = re.sub(r"^```json\s*", "", text)
-    text = re.sub(r"^```\s*", "", text)
-    text = re.sub(r"\s*```$", "", text)
-    return text.strip()
+def choose_language():
+    global selected_language
+    print("\nChoose language / Chagua lugha / Chagua lugha:")
+    print("1. English")
+    print("2. Swahili")
+    print("3. Sheng")
+    choice = input("Enter choice (1-3): ").strip()
+    if choice == "2":
+        selected_language = "Swahili"
+    elif choice == "3":
+        selected_language = "Sheng"
+    else:
+        selected_language = "English"
+    print(f"Language set to: {selected_language}")
+    return selected_language
 
-def ask_gemini(prompt_text, required_fields):
+# --- NEW: Send FULL history with EVERY API call - at least 4 turns ---
+def ask_gemini_with_full_history(session_obj):
+    """
+    PDF rule: Full list of messages sent with each API call.
+    We build one prompt with:
+    - system instruction (persona + knowledge + language)
+    - FULL conversation so far from session.py (Turn 1...Turn N)
+    - instruction to reply in JSON
+    Returns parsed dict.
+    """
+    system_text = build_system_prompt(ASSISTANT_NAME, CLINIC_NAME, CLINIC_PHONE, knowledge, old_memory, selected_language)
+    full_history = session_obj.get_history_for_api()  # ALL turns, not just last one
+    full_prompt = (
+        system_text
+        + "\n\n--- FULL CONVERSATION SO FAR (use this to remember earlier turns) ---\n"
+        + full_history
+        + "\n--- END OF CONVERSATION ---\n"
+        + "\nReply to the LAST patient message above. Reply ONLY in JSON: {\"answer\": \"...\", \"triage\": \"...\", \"is_emergency\": false}"
+    )
+    response = client.models.generate_content(
+        model="gemini-3.5-flash-lite",
+        contents=full_prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0.2,
+            max_output_tokens=300,
+        )
+    )
+    clean = response.text.replace("```json", "").replace("```", "").strip()
+    return json.loads(clean)
+
+def save_memory(question, answer):
+    global old_memory
+    if old_memory.strip() == "No previous conversation.":
+        old_memory = ""
+    new_entry = f"\npatient: {question}\n{ASSISTANT_NAME}: {answer}\n"
+    old_memory += new_entry
+    old_memory = "\n".join(old_memory.splitlines()[-40:])
+    with open(MEMORY_FILE, "w", encoding="utf-8") as file:
+        file.write(old_memory)
+
+def is_greeting(question):
+    greetings = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", "habari", "niaje", "sasa", "mambo", "hujambo", "salama", "hello mediq"]
+    return question.lower().strip().strip("!.?") in greetings
+
+def is_emergency(question):
+    emergency_words = ["difficulty breathing", "cannot breathe", "can't breathe", "cant breathe", "shortness of breath", "chest pain", "maumivu ya kifua", "coughing blood", "vomiting blood", "heavy bleeding", "bleeding heavily", "pregnant and bleeding", "pregnancy bleeding", "mjamzito na damu", "snake bite", "snake bitten", "nyoka ameniuma", "fainting", "unconscious", "unresponsive", "seizure", "kifafa", "deep cut", "animal bite", "severe allergic reaction", "swollen face", "face is swelling", "blue lips", "head injury", "baby not breastfeeding", "baby not feeding", "baby is not moving"]
+    q = question.lower()
+    return any(word in q for word in emergency_words)
+
+def is_offline_error(error_text):
+    return any(word in error_text for word in ["connection", "network", "timeout", "getaddrinfo", "gaierror", "name resolution", "11001", "11002", "dns", "unreachable", "failed to resolve", "no internet"])
+
+def normalise_phone(phone):
+    return re.sub(r"[\s\-()]", "", phone)
+
+def valid_kenyan_phone(phone):
+    cleaned = normalise_phone(phone)
+    return bool(re.fullmatch(r"0[17]\d{8}", cleaned) or re.fullmatch(r"\+254[17]\d{8}", cleaned) or re.fullmatch(r"254[17]\d{8}", cleaned))
+
+def load_bookings():
     try:
-        if not client:
-            print("ERROR: No API key. Check your .env file.")
-            return None
+        with open(BOOKINGS_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+        return data if isinstance(data, list) else []
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+def save_booking(booking):
+    bookings = load_bookings()
+    bookings.append(booking)
+    with open(BOOKINGS_FILE, "w", encoding="utf-8") as file:
+        json.dump(bookings, file, indent=4, ensure_ascii=False)
+
+def create_booking_id():
+    return "HHC-" + uuid.uuid4().hex[:8].upper()
+
+def classify_service(message):
+    q = message.lower()
+    dental_words = ["dental", "dentist", "tooth", "teeth", "meno", "jino", "gum", "toothache"]
+    lab_words = ["lab", "test", "blood test", "malaria", "sugar", "typhoid", "urine", "kipimo"]
+    child_health_words = ["child health", "child", "mtoto", "watoto", "baby health", "kids health", "child checkup", "child clinic", "mtoto mgonjwa", "baby"]
+    general_words = ["general", "consultation", "doctor", "daktari", "checkup", "check-up", "fever", "cough", "coughing", "stomach", "headache", "sick", "unwell", "running nose", "runny nose", "flu", "cold", "sneezing", "sore throat", "remedy", "symptom", "symptoms"]
+    vaccination_words = ["vaccination", "vaccine", "vaccines", "kids vaccination", "child vaccination", "children vaccination", "chanjo"]
+    other_words = ["family planning", "wound dressing", "home visit"]
+    if any(word in q for word in dental_words):
+        return "Dental care"
+    if any(word in q for word in lab_words):
+        return "Lab test"
+    if any(word in q for word in child_health_words):
+        return "Child health"
+    if any(word in q for word in general_words):
+        return "General consultation"
+    if any(word in q for word in vaccination_words):
+        return "Child vaccination"
+    if any(word in q for word in other_words):
+        return "Other clinic service"
+    return None
+
+def is_booking_request(message):
+    q = message.lower()
+    booking_phrases = ["i want to book", "i would like to book", "i'd like to book", "book an appointment", "make an appointment", "schedule an appointment", "can i book", "i need an appointment", "nataka ku-book", "nataka appointment", "ningependa kuweka appointment", "book for me", "book", "booking"]
+    return any(phrase in q for phrase in booking_phrases)
+
+def parse_appointment_date(message):
+    value = message.strip()
+    for date_format in ["%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"]:
+        try:
+            return datetime.strptime(value, date_format).date()
+        except ValueError:
+            pass
+    return None
+
+def parse_appointment_time(message):
+    value = message.strip().upper().replace(".", ":")
+    value = re.sub(r"(\d)(AM|PM)$", r"\1 \2", value)
+    for time_format in ["%I:%M %p", "%I %p", "%H:%M"]:
+        try:
+            return datetime.strptime(value, time_format).time()
+        except ValueError:
+            continue
+    return None
+
+def clinic_hours_for(day):
+    weekday = day.weekday()
+    if weekday <= 4:
+        return time(8, 0), time(18, 0)
+    if weekday == 5:
+        return time(9, 0), time(14, 0)
+    return None, None
+
+def validate_appointment_schedule(service, doctor, appointment_date, appointment_time):
+    bt = BOOKING_TEXT[selected_language]
+    opening, closing = clinic_hours_for(appointment_date)
+    if opening is None:
+        return False, bt["closed_sunday"]
+    if not (opening <= appointment_time <= closing):
+        return False, bt["outside_hours"]
+    weekday = appointment_date.weekday()
+    if service == "General consultation":
+        if weekday > 4:
+            return False, bt["outside_hours"]
+        if doctor == "Dr Nancy":
+            if not (time(9, 0) <= appointment_time <= time(13, 0)):
+                return False, bt["outside_hours"]
+        elif doctor == "Dr Otieno":
+            if not (time(14, 0) <= appointment_time <= time(18, 0)):
+                return False, bt["outside_hours"]
+    if service == "Child health":
+        if weekday > 4:
+            return False, bt["outside_hours"]
+        if not (time(9, 0) <= appointment_time <= time(13, 0)):
+            return False, bt["outside_hours"]
+    if service == "Dental care":
+        if weekday not in [0, 2, 4]:
+            return False, bt["outside_hours"]
+        if appointment_date <= date.today():
+            return False, bt["dental_advance"]
+    if appointment_date < date.today():
+        return False, bt["date_past"]
+    if appointment_date == date.today() and appointment_time <= datetime.now().time():
+        return False, bt["time_past"]
+    return True, ""
+
+booking_state = None
+booking_data = {}
+booking_offer_pending = False
+booking_offer_service = None
+last_service_hint = None
+
+def start_booking(service=None):
+    global booking_state, booking_data, booking_offer_pending, booking_offer_service
+    bt = BOOKING_TEXT[selected_language]
+    booking_data = {}
+    booking_offer_pending = False
+    booking_offer_service = None
+    if not service:
+        booking_state = "ASK_SERVICE"
+        return bt["ask_service"]
+    booking_data["service"] = service
+    if service == "General consultation":
+        booking_state = "ASK_DOCTOR"
+        return bt["ask_doctor"]
+    if service == "Child health":
+        booking_data["doctor"] = "Dr Nancy"
+        booking_state = "ASK_DATE"
+        return bt["ask_date_child"]
+    if service == "Dental care":
+        booking_data["doctor"] = "Dr Wanjiru"
+        booking_state = "ASK_DATE"
+        return bt["ask_date_dental"]
+    if service == "Lab test":
+        booking_data["doctor"] = "Not applicable"
+        booking_state = "ASK_DATE"
+        return bt["ask_date_lab"]
+    if service == "Child vaccination":
+        booking_data["doctor"] = "Dr Nancy"
+    else:
+        booking_data["doctor"] = "To be confirmed by clinic"
+    booking_state = "ASK_DATE"
+    return bt["ask_date_general"]
+
+def handle_booking_message(message):
+    global booking_state, booking_data, booking_offer_pending
+    bt = BOOKING_TEXT[selected_language]
+    misc = MISC_TEXT[selected_language]
+    q = message.strip()
+    if q.lower() in ["cancel", "cancel booking", "stop", "acha", "wacha"]:
+        booking_state = None
+        booking_data = {}
+        return bt["stop"]
+    if booking_state == "ASK_SERVICE":
+        service = classify_service(q)
+        if not service:
+            return bt["invalid_service"]
+        booking_data["service"] = service
+        if service == "General consultation":
+            booking_state = "ASK_DOCTOR"
+            return bt["ask_doctor"]
+        if service == "Child health":
+            booking_data["doctor"] = "Dr Nancy"
+            booking_state = "ASK_DATE"
+            return bt["ask_date_child"]
+        if service == "Dental care":
+            booking_data["doctor"] = "Dr Wanjiru"
+            booking_state = "ASK_DATE"
+            return bt["ask_date_dental"]
+        if service == "Lab test":
+            booking_data["doctor"] = "Not applicable"
+            booking_state = "ASK_DATE"
+            return bt["ask_date_lab"]
+        if service == "Child vaccination":
+            booking_data["doctor"] = "Dr Nancy"
+        else:
+            booking_data["doctor"] = "To be confirmed by clinic"
+        booking_state = "ASK_DATE"
+        return bt["ask_date_other"]
+    if booking_state == "ASK_DOCTOR":
+        q_lower = q.lower()
+        if "nancy" in q_lower:
+            doctor = "Dr Nancy"
+        elif "otieno" in q_lower:
+            doctor = "Dr Otieno"
+        elif any(word in q_lower for word in ["no preference", "any", "either", "whoever", "huna upendeleo", "huna preference"]):
+            doctor = "No preference"
+        else:
+            return bt["invalid_doctor"]
+        booking_data["doctor"] = doctor
+        booking_state = "ASK_DATE"
+        return bt["ask_date"]
+    if booking_state == "ASK_DATE":
+        if booking_data.get("service") == "Lab test" and "test" not in booking_data:
+            booking_data["test"] = q
+            return bt["ask_date"]
+        appointment_date = parse_appointment_date(q)
+        if not appointment_date:
+            return bt["invalid_date"]
+        if appointment_date < date.today():
+            return bt["date_past"]
+        if appointment_date.weekday() == 6:
+            return bt["closed_sunday"]
+        booking_data["date"] = appointment_date.isoformat()
+        booking_state = "ASK_TIME"
+        return bt["ask_time"]
+    if booking_state == "ASK_TIME":
+        appointment_time = parse_appointment_time(q)
+        if not appointment_time:
+            return bt["invalid_time"]
+        appointment_date = date.fromisoformat(booking_data["date"])
+        service = booking_data["service"]
+        doctor = booking_data.get("doctor", "")
+        if service == "General consultation" and doctor == "No preference":
+            if time(9, 0) <= appointment_time <= time(13, 0):
+                doctor = "Dr Nancy"
+            elif time(14, 0) <= appointment_time <= time(18, 0):
+                doctor = "Dr Otieno"
+            else:
+                return bt["outside_hours"]
+            booking_data["doctor"] = doctor
+        valid, reason = validate_appointment_schedule(service, doctor, appointment_date, appointment_time)
+        if not valid:
+            return reason
+        booking_data["time"] = appointment_time.strftime("%I:%M %p")
+        booking_state = "ASK_NAME"
+        return bt["ask_name"]
+    if booking_state == "ASK_NAME":
+        if len(q.split()) < 2 or len(q) < 5:
+            return bt["invalid_name"]
+        booking_data["name"] = q
+        booking_state = "ASK_PHONE"
+        return bt["ask_phone"]
+    if booking_state == "ASK_PHONE":
+        if not valid_kenyan_phone(q):
+            return bt["invalid_phone"]
+        booking_data["phone"] = normalise_phone(q)
+        if "test" in booking_data:
+            summary = bt["confirm_lab"].format(name=booking_data['name'], phone=booking_data['phone'], service=booking_data['service'], doctor=booking_data.get('doctor', 'To be confirmed'), date=booking_data['date'], time=booking_data['time'], test=booking_data['test'])
+        else:
+            summary = bt["confirm"].format(name=booking_data['name'], phone=booking_data['phone'], service=booking_data['service'], doctor=booking_data.get('doctor', 'To be confirmed'), date=booking_data['date'], time=booking_data['time'])
+        booking_state = "CONFIRM"
+        return summary
+    if booking_state == "CONFIRM":
+        answer = q.lower().strip()
+        if answer in ["yes", "y", "ndio", "ndio kabisa", "sawa"]:
+            booking_id = create_booking_id()
+            booking_record = {"booking_id": booking_id, "name": booking_data["name"], "phone": booking_data["phone"], "service": booking_data["service"], "doctor": booking_data.get("doctor", "To be confirmed"), "date": booking_data["date"], "time": booking_data["time"], "lab_test": booking_data.get("test"), "status": "PENDING_CLINIC_CONFIRMATION", "date_saved": datetime.now().isoformat(timespec="seconds")}
+            save_booking(booking_record)
+            appointment_date_display = date.fromisoformat(booking_data["date"]).strftime("%d %B %Y")
+            doctor = booking_data.get("doctor", "Healthcare provider")
+            confirmation_message = bt["confirmed"].format(id=booking_id, name=booking_data['name'], service=booking_data['service'], doctor=doctor, date=appointment_date_display, time=booking_data['time'])
+            booking_state = None
+            booking_data = {}
+            return confirmation_message
+        if answer in ["no", "n", "hapana", "cancel"]:
+            booking_state = None
+            booking_data = {}
+            return bt["cancelled"]
+        return bt["confirm_yes_no"]
+    return misc["how_help"]
+
+def show_past_session():
+    print("\n--- Past Session ---")
+    files = list_saved_sessions()
+    if not files:
+        try:
+            with open(MEMORY_FILE, "r", encoding="utf-8") as file:
+                content = file.read().strip()
+            if content == "No previous conversation.":
+                content = ""
+            if not content:
+                print("No past session found.")
+            else:
+                print(content)
+        except OSError:
+            print("No past session found.")
+        print("-" * 50)
+        return
+    print("Saved sessions:")
+    for i, f in enumerate(files, 1):
+        print(f"{i}. {f}")
+    print(f"{len(files)+1}. Back to menu")
+    choice = input("Choose session to open (number): ").strip()
+    try:
+        num = int(choice)
+        if num == len(files) + 1:
+            return
+        if 1 <= num <= len(files):
+            content = load_saved_session(files[num - 1])
+            print("\n" + content if content else "Could not open session file.")
+        else:
+            print("Invalid choice.")
+    except (ValueError, IndexError):
+        print("Invalid choice.")
+    print("-" * 50)
+
+def view_bookings():
+    print("\n--- View Bookings ---")
+    bookings = load_bookings()
+    if not bookings:
+        print("No bookings found.")
+    else:
+        for b in bookings:
+            print(f"{b.get('booking_id', '')} | {b.get('name', '')} | {b.get('service', '')} | {b.get('doctor', '')} | {b.get('date', '')} {b.get('time', '')} | {b.get('phone', '')} | {b.get('status', '')}")
+    print("-" * 50)
+
+def generate_summary(session_obj=None):
+    try:
+        if session_obj is not None and session_obj.messages:
+            history_text = session_obj.get_history_for_api()
+        else:
+            history_text = old_memory
         response = client.models.generate_content(
             model="gemini-3.5-flash-lite",
-            contents=prompt_text,
-            config=types.GenerateContentConfig(
-                temperature=0.3,
-                max_output_tokens=2000,
-                response_mime_type="application/json"
-            )
+            contents=SUMMARY_PROMPT + "\n" + history_text
         )
-        raw = clean_json(response.text)
-        try:
-            data = json.loads(raw)
-        except:
-            data = {"reply": raw, "language": "English", "main_reason": raw, "session_date": ""}
-        if "reply" not in data and "main_reason" not in data:
-            data["reply"] = raw
-        if "reply" not in data and "main_reason" in required_fields:
-            data["main_reason"] = raw
-        for field in required_fields:
-            if field not in data or data[field] == "" or data[field] is None:
-                if field == "reply":
-                    data[field] = raw
-                elif field == "language":
-                    data[field] = "English"
-                else:
-                    data[field] = "Not provided"
-        return data
-    except Exception as e:
-        print(f"\nREAL ERROR: {e}")
-        print("\n----------------------------------------")
-        print("No internet connection.")
-        print("Please connect to internet to continue.")
-        print("----------------------------------------")
-        return None
+        summary_text = response.text.strip()
+        print("\n--- Session Summary ---")
+        print(summary_text)
+        print("-" * 50)
+        return summary_text
+    except Exception:
+        return "No summary generated - API call failed."
 
-def save_booking(name, phone, date, time, reason):
-    try:
-        with open(BOOKING_FILE, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    b = json.loads(line)
-                    if b.get("patient_name") == name and b.get("date") == date and b.get("time") == time and b.get("reason") == reason:
-                        print(f"\n[BOOKING ALREADY SAVED - skipping duplicate]")
-                        return b
-                except:
-                    continue
-    except FileNotFoundError:
-        pass
-    booking = {
-        "patient_name": name,
-        "phone": phone,
-        "date": date,
-        "time": time,
-        "reason": reason,
-        "booked_at": datetime.now().strftime("%Y-%m-%d %H:%M")
-    }
-    with open(BOOKING_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(booking) + "\n")
-    print(f"\n[BOOKING SAVED] {name} - {date} at {time} - {reason}")
-    return booking
-
-def new_session():
-    print("\n--- New Session ---")
-    print("Type 'exit' to end session and get summary (after at least 4 turns).")
-    print("Type 'menu' to go back to menu.\n")
-    name = input("MedIQ: What is your name? (or press Enter to skip): ").strip()
-    language = input("MedIQ: Which language? English / Swahili / Sheng: ").strip() or "English"
-    history = []
-    booked_this_session = False
-    turn_count = 0
-    if name:
-        history.append(f"Patient name: {name}")
-    history.append(f"Language: {language}")
+def run_chat():
+    global booking_state, booking_data, booking_offer_pending, booking_offer_service, last_service_hint
+    t = TEXT[selected_language]
+    misc = MISC_TEXT[selected_language]
+    session = Session(selected_language)
+    if not check_internet():
+        if not wait_for_internet():
+            print(f"MedIQ: {t['ended']}")
+            return
+    print(f"\nMedIQ: {t['greeting']}")
+    session.add("MedIQ", t["greeting"])
+    print(t["back"])
+    print("-" * 50)
     while True:
-        user_msg = input("\nYou: ").strip()
-        if user_msg.lower() == "exit":
-            if turn_count < 4:
-                print(f"\n[MedIQ needs at least 4 turns. You have done {turn_count}/4 turns.]")
-                print(f"Please chat {4 - turn_count} more turn(s) before exiting.")
-                continue
+        question = input("you: ").strip()
+        if question.lower() == "exit":
+            summary_text = generate_summary(session)
+            try:
+                md_path, json_path = session.save(summary_text)
+                print(f"Session saved to: {md_path}")
+            except Exception as e:
+                print(f"Could not save session: {e}")
+            try:
+                save_to_memory_file(session.messages)
+            except Exception:
+                pass
+            print(f"MedIQ: {t['ended']}")
             break
-        if user_msg.lower() == "menu":
-            return
-        if not user_msg:
+        if not question:
             continue
-        history.append(f"Patient: {user_msg}")
-        conversation = "\n".join(history)
-        prompt_text = build_prompt(KNOWLEDGE, conversation, language, history, user_msg)
-        result = ask_gemini(prompt_text, ["reply", "language"])
-        if result:
-            reply = result["reply"]
-            print(f"\nMedIQ: {reply}")
-            history.append(f"MedIQ: {reply}")
-            turn_count += 1
-            print(f"[Turn {turn_count}/4]")
-            booking_date = result.get("booking_date", "")
-            booking_time = result.get("booking_time", "")
-            booking_phone = result.get("booking_phone", "")
-            if not booked_this_session and booking_date and booking_time and booking_date != "Not provided" and booking_phone and booking_phone != "Not provided":
-                b_name = result.get("booking_name", name) or name or "Unknown"
-                if b_name == "Not provided":
-                    b_name = name or "Unknown"
-                b_reason = result.get("booking_reason", user_msg)
-                if b_reason == "Not provided":
-                    b_reason = user_msg
-                save_booking(b_name, booking_phone, booking_date, booking_time, b_reason)
-                booked_this_session = True
-        else:
-            print("Try again after connecting to internet.")
-    print("\n--- Generating Summary ---")
-    full_convo = "\n".join(history)
-    summary_prompt_text = SUMMARY_PROMPT + f"\n\nCONVERSATION:\n{full_convo}"
-    summary = ask_gemini(summary_prompt_text, ["main_reason", "session_date"])
-    if summary:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        summary["session_date"] = timestamp
-        if not summary.get("patient_name") or summary.get("patient_name") == "Not provided":
-            summary["patient_name"] = name or "Unknown"
-        with open(MEMORY_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(summary) + "\n")
-            f.flush()
-        print("\n--- Session Summary Saved ---")
-        print(f"Saved to: {os.path.abspath(MEMORY_FILE)}")
-        print(f"Patient saved: {summary.get('patient_name')} - {summary.get('main_reason')}")
-        print(json.dumps(summary, indent=2))
-    else:
-        print("Could not generate summary. Check internet and try again.")
-
-def open_past_session():
-    print("\n--- Past Sessions ---")
-    try:
-        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-            lines = [l for l in f.readlines() if l.strip()]
-        if not lines:
-            print("No past sessions yet.")
-            return
-        for i, line in enumerate(lines, 1):
-            try:
-                s = json.loads(line)
-                print(f"{i}. {s.get('session_date','')} - {s.get('patient_name','Unknown')} - {s.get('main_reason','')}")
-            except:
+        if not check_internet():
+            if not wait_for_internet():
+                print(f"MedIQ: {t['ended']}")
+                break
+            continue
+        session.add("you", question)
+        if is_emergency(question):
+            booking_state = None
+            booking_data = {}
+            booking_offer_pending = False
+            print(f"MedIQ: {misc['emergency']}")
+            session.add("MedIQ", misc["emergency"])
+            print("-" * 50)
+            continue
+        if booking_state is not None:
+            answer = handle_booking_message(question)
+            print(f"MedIQ: {answer}")
+            session.add("MedIQ", answer)
+            print("-" * 50)
+            continue
+        if classify_service(question) is not None:
+            last_service_hint = classify_service(question)
+        if is_booking_request(question):
+            service = classify_service(question) or last_service_hint
+            if not service:
+                service = "General consultation"
+            answer = start_booking(service)
+            print(f"MedIQ: {answer}")
+            session.add("MedIQ", answer)
+            print("-" * 50)
+            continue
+        yes_replies = ["yes", "yeah", "yep", "ndio", "sawa", "okay", "ok"]
+        if booking_offer_pending and question.lower().strip("!.?") in yes_replies:
+            answer = start_booking(booking_offer_service)
+            print(f"MedIQ: {answer}")
+            session.add("MedIQ", answer)
+            print("-" * 50)
+            continue
+        if booking_offer_pending and question.lower().strip("!.?") in ["no", "no thanks", "hapana"]:
+            booking_offer_pending = False
+            booking_offer_service = None
+            print(f"MedIQ: {misc['no_problem']}")
+            session.add("MedIQ", misc["no_problem"])
+            print("-" * 50)
+            continue
+        if is_greeting(question):
+            answer = t["greeting"]
+            print(f"MedIQ: {answer}")
+            session.add("MedIQ", answer)
+            booking_offer_pending = False
+            booking_offer_service = None
+            print("-" * 50)
+            continue
+        booking_offer_pending = False
+        booking_offer_service = None
+        if is_cacheable(question):
+            cached = get_cached(question)
+            if cached:
+                print(f"MedIQ: {cached}")
+                session.add("MedIQ", cached)
+                booking_offer_pending = bool(re.search(r"\b(would you like to book|do you want to book|would you like an appointment)\b", cached.lower()))
+                booking_offer_service = classify_service(question)
+                if booking_offer_pending and booking_offer_service is None:
+                    booking_offer_service = "General consultation"
+                save_memory(question, cached)
+                print("-" * 50)
                 continue
-        pick = input("\nEnter session number to see full details (or press Enter to go back): ").strip()
-        if not pick:
-            return
         try:
-            s = json.loads(lines[int(pick)-1])
-            print("\n--- FULL SESSION DETAILS ---")
-            print(json.dumps(s, indent=2))
-        except:
-            print("Invalid number.")
-    except FileNotFoundError:
-        print("No past sessions yet.")
-
-def open_bookings():
-    print("\n--- Bookings ---")
-    try:
-        with open(BOOKING_FILE, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        if not lines:
-            print("No bookings yet.")
-            return
-        for i, line in enumerate(lines, 1):
-            try:
-                b = json.loads(line)
-                print(f"{i}. {b.get('date','')} at {b.get('time','')} - {b.get('patient_name','Unknown')} - {b.get('phone','')} - {b.get('reason','')}")
-            except:
-                continue
-    except FileNotFoundError:
-        print("No bookings yet.")
+            # FIXED: Send FULL history every time, not just last question
+            data = ask_gemini_with_full_history(session)
+            answer = data.get("answer", data.get("reply", "Sorry, I could not understand that. Please try again."))
+            if data.get("is_emergency") is True or data.get("triage") == "EMERGENCY":
+                answer = misc["emergency"]
+            print(f"MedIQ: {answer}")
+            session.add("MedIQ", answer)
+            booking_offer_pending = bool(re.search(r"\b(would you like to book|do you want to book|would you like an appointment|shall i book)\b", answer.lower()))
+            booking_offer_service = classify_service(question)
+            if booking_offer_pending and booking_offer_service is None:
+                booking_offer_service = "General consultation"
+            if data.get("is_emergency") is not True and data.get("triage") not in ["EMERGENCY", "COME TODAY"]:
+                if is_cacheable(question):
+                    set_cache(question, answer)
+                save_memory(question, answer)
+        except Exception as error:
+            error_text = str(error).lower()
+            if "503" in error_text or "unavailable" in error_text:
+                msg = "Sorry, Gemini is busy right now. Please try again in a minute."
+                print(f"MedIQ: {msg}")
+                session.add("MedIQ", msg)
+            elif is_offline_error(error_text):
+                print(f"MedIQ: {t['no_internet']}")
+                if not wait_for_internet():
+                    print(f"MedIQ: {t['ended']}")
+                    break
+                booking_offer_pending = False
+                booking_offer_service = None
+            else:
+                msg = "Sorry, I'm having a problem responding right now. Please try again or call 0712 345 678."
+                print(f"MedIQ: {msg}")
+                session.add("MedIQ", msg)
+                booking_offer_pending = False
+                booking_offer_service = None
+        print("-" * 50)
 
 def main():
-    print("MedIQ AI - Hope Health Clinic FAQ Assistant")
+    global old_memory, booking_state, booking_data
+    choose_language()
+    t = TEXT[selected_language]
+    print("\n" + t["welcome"])
+    print("-" * 50)
     while True:
-        print("\n--- MENU ---")
-        print("1. Start New Session")
-        print("2. Open Past Session")
-        print("3. View Bookings")
-        print("4. Exit")
-        choice = input("Choose (1/2/3/4): ").strip()
-        if choice == "1":
-            new_session()
-        elif choice == "2":
-            open_past_session()
-        elif choice == "3":
-            open_bookings()
-        elif choice == "4":
-            print("Goodbye! Stay healthy.")
+        print(t["choose"])
+        print(t["new"])
+        print(t["past"])
+        print(t["bookings"])
+        print(t["exit"])
+        choice = input(t["enter"]).strip().lower()
+        if choice in ["1", "new session", "new", "1."]:
+            booking_state = None
+            booking_data = {}
+            run_chat()
+            try:
+                with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+                    old_memory = f.read().strip() or "No previous conversation."
+            except OSError:
+                pass
+        elif choice in ["2", "past session", "past", "2."]:
+            show_past_session()
+        elif choice in ["3", "view bookings", "bookings", "3."]:
+            view_bookings()
+        elif choice in ["4", "exit", "quit", "4."]:
+            print(f"MedIQ: {t['bye']}")
             break
         else:
-            print("Please choose 1, 2, 3 or 4.")
+            print(t["invalid"])
 
 if __name__ == "__main__":
     main()

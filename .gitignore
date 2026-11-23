@@ -1,11 +1,6 @@
-# Environment variables
 .env
-
-# Virtual environment
-venv/
-
-# Python cache
 __pycache__/
-*.pyc
+.vscode/
+booking.json
+memory.json
 memory.txt
-bookings.json
