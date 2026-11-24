@@ -3,7 +3,7 @@
 # Menu: 1. New session, 2. Past session, 3. View bookings, 4. Exit
 # Language: English / Swahili / Sheng
 # Conversation Memory: FULL list of messages sent with EVERY API call - supports at least 4 turns
-# Saved Session: full conversation + summary saved to samples/session_DATE.md + .json
+# Saved Session: full conversation + summary saved to sessions/session_DATE.md + .json
 
 from google import genai
 from google.genai import types
@@ -519,13 +519,22 @@ def handle_booking_message(message):
         if booking_data.get("service") == "Lab test" and "test" not in booking_data:
             booking_data["test"] = q
             return bt["ask_date"]
+
         appointment_date = parse_appointment_date(q)
+
         if not appointment_date:
             return bt["invalid_date"]
+
         if appointment_date < date.today():
             return bt["date_past"]
+
+        # Check clinic operating days
+        if appointment_date.weekday() == 5:
+            return "The clinic is closed on Saturdays. Please choose a weekday (Monday to Friday)."
+
         if appointment_date.weekday() == 6:
             return bt["closed_sunday"]
+
         booking_data["date"] = appointment_date.isoformat()
         booking_state = "ASK_TIME"
         return bt["ask_time"]
