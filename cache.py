@@ -29,15 +29,28 @@ def set_cache(question, answer):
     _save(data)
 
 def is_cacheable(question):
-    q = question.lower()
+    q = question.lower().strip()
+
     not_cacheable = [
         "book", "booking", "appointment",
-        "my name", "phone", "071", "072", "073", "074",
+        "my name", "name is", "i'm ", "i am ",
+        "phone", "071", "072", "073", "074",
         "075", "076", "077", "078", "079", "254",
         "i have", "i feel", "my child", "mtoto",
         "cough", "fever", "headache", "pain", "symptom",
-        "sick", "unwell", "bleeding", "chest"
+        "sick", "unwell", "bleeding", "chest",
+        "nancy", "otieno", "wanjiru",
+        "am", "pm", "yes", "no", "ndio", "hapana",
+        "thank you", "thanks"
     ]
+
+    if any(word in q for word in not_cacheable):
+        return False
+
+    if len(q.split()) < 2:
+        return False
+
+    return True
     if any(word in q for word in not_cacheable):
         return False
     if len(q.split()) < 2:

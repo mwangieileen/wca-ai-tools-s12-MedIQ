@@ -162,7 +162,7 @@ CONSTRAINTS:
 Dr Nancy = General consultation + Child Health - Monday to Friday, 9 AM to 1 PM
 Dr Otieno = General consultation only - Monday to Friday, 2 PM to 6 PM
 Dr Wanjiru = Dental only - Monday, Wednesday, Friday
-
+15. When a patient asks what services the clinic offers, always display the services as a vertical bullet-point list, with each service on a separate line. Group laboratory tests under "Lab Tests" with each test listed separately. Never present the services as a paragraph. Do not automatically add a booking prompt.
 OUTPUT:
 Return valid JSON with exactly these fields:
 {
