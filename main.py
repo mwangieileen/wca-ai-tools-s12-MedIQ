@@ -79,7 +79,7 @@ TEXT = {
         "greeting": "Hello! Welcome to Hope Clinic. I'm MedIQ, your virtual medical assistant. How may I help you today?",
         "back": "Type 'exit' to go back to menu.",
         "ended": "Session ended. Returning to menu.",
-        "bye": "Take care!",
+        "bye": "Thank you for contacting Hope Clinic.Have a great day!",
         "invalid": "Please enter 1, 2, 3 or 4.",
         "no_internet": "No internet connection. Please connect to internet to continue.",
         "retry": "Press Enter to try again, or type 'exit' to go back to menu: ",
@@ -650,9 +650,6 @@ def generate_summary(session_obj=None):
             contents=SUMMARY_PROMPT + "\n" + history_text
         )
         summary_text = response.text.strip()
-        print("\n--- Session Summary ---")
-        print(summary_text)
-        print("-" * 50)
         return summary_text
     except Exception:
         return "No summary generated - API call failed."
@@ -666,9 +663,8 @@ def run_chat():
         if not wait_for_internet():
             print(f"MedIQ: {t['ended']}")
             return
-    print(f"\nMedIQ: {t['greeting']}")
-    session.add("MedIQ", t["greeting"])
-    print(t["back"])
+    print(f"\nMedIQ: {misc['how_help']}")
+    session.add("MedIQ", misc["how_help"])
     print("-" * 50)
     while True:
         question = input("you: ").strip()
@@ -676,9 +672,8 @@ def run_chat():
             summary_text = generate_summary(session)
             try:
                 md_path, json_path = session.save(summary_text)
-                print(f"Session saved to: {md_path}")
-            except Exception as e:
-                print(f"Could not save session: {e}")
+            except Exception:
+                pass
             try:
                 save_to_memory_file(session.messages)
             except Exception:
@@ -745,15 +740,20 @@ def run_chat():
         if is_cacheable(question):
             cached = get_cached(question)
             if cached:
-                print(f"MedIQ: {cached}")
-                session.add("MedIQ", cached)
-                booking_offer_pending = bool(re.search(r"\b(would you like to book|do you want to book|would you like an appointment)\b", cached.lower()))
-                booking_offer_service = classify_service(question)
-                if booking_offer_pending and booking_offer_service is None:
-                    booking_offer_service = "General consultation"
-                save_memory(question, cached)
-                print("-" * 50)
-                continue
+                cached_answer = cached.get("answer", "") if isinstance(cached, dict) else cached
+
+                if cached_answer:
+                    print(f"MedIQ: {cached_answer}")
+                    session.add("MedIQ", cached_answer)
+                    booking_offer_pending = bool(re.search(r"\b(would you like to book|do you want to book|would you like an appointment)\b", cached_answer.lower()))
+                    booking_offer_service = classify_service(question)
+
+                    if booking_offer_pending and booking_offer_service is None:
+                        booking_offer_service = "General consultation"
+
+                    save_memory(question, cached_answer)
+                    print("-" * 50)
+                    continue
         try:
             # FIXED: Send FULL history every time, not just last question
             data = ask_gemini_with_full_history(session)
@@ -793,10 +793,16 @@ def run_chat():
 
 def main():
     global old_memory, booking_state, booking_data
+
+    # Display welcome before language selection
+    print("\nMedIQ - Hope Clinic")
+    print("Your Virtual Medical Assistant")
+    print("\nMedIQ: Hello! Welcome to Hope Clinic. I'm MedIQ, your virtual medical assistant.")
+    print("-" * 50)
+
     choose_language()
     t = TEXT[selected_language]
-    print("\n" + t["welcome"])
-    print("-" * 50)
+
     while True:
         print(t["choose"])
         print(t["new"])
