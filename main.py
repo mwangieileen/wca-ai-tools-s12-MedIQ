@@ -5,8 +5,7 @@
 # Conversation Memory: FULL list of messages sent with EVERY API call - supports at least 4 turns
 # Saved Session: full conversation + summary saved to sessions/session_DATE.md + .json
 
-from google import genai
-from google.genai import types
+from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import re
@@ -27,16 +26,13 @@ CLINIC_NAME = "Hope Clinic"
 CLINIC_PHONE = "0712 345 678"
 
 load_dotenv()
-api_key = os.getenv("api_key")
-if not api_key:
-    raise ValueError("api_key not found. Check your .env file.")
 
-client = genai.Client(
-    api_key=api_key,
-    http_options=types.HttpOptions(
-        retry_options=types.HttpRetryOptions(attempts=5, initial_delay=1.0, max_delay=30.0)
-    )
-)
+api_key = os.getenv("OPENAI_API_KEY")
+
+if not api_key:
+    raise ValueError("OPENAI_API_KEY not found. Check your .env file.")
+
+client = OpenAI(api_key=api_key)
 
 try:
     with open(KNOWLEDGE_FILE, "r", encoding="utf-8") as file:
@@ -266,7 +262,7 @@ def choose_language():
     return selected_language
 
 # --- NEW: Send FULL history with EVERY API call - at least 4 turns ---
-def ask_gemini_with_full_history(session_obj):
+def ask_openai_with_full_history(session_obj):
     """
     PDF rule: Full list of messages sent with each API call.
     We build one prompt with:
@@ -275,26 +271,42 @@ def ask_gemini_with_full_history(session_obj):
     - instruction to reply in JSON
     Returns parsed dict.
     """
-    system_text = build_system_prompt(ASSISTANT_NAME, CLINIC_NAME, CLINIC_PHONE, knowledge, old_memory, selected_language)
+
+    system_text = build_system_prompt(
+        ASSISTANT_NAME,
+        CLINIC_NAME,
+        CLINIC_PHONE,
+        knowledge,
+        old_memory,
+        selected_language
+    )
+
     full_history = session_obj.get_history_for_api()  # ALL turns, not just last one
+
     full_prompt = (
         system_text
         + "\n\n--- FULL CONVERSATION SO FAR (use this to remember earlier turns) ---\n"
         + full_history
         + "\n--- END OF CONVERSATION ---\n"
-        + "\nReply to the LAST patient message above. Reply ONLY in JSON: {\"answer\": \"...\", \"triage\": \"...\", \"is_emergency\": false}"
+        + "\nReply to the LAST patient message above. Reply ONLY in JSON: "
+        "{\"answer\": \"...\", \"triage\": \"...\", \"is_emergency\": false}"
     )
-    response = client.models.generate_content(
-        model="gemini-3.5-flash-lite",
-        contents=full_prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.2,
-            max_output_tokens=300,
-        )
+
+    response = client.responses.create(
+        model="gpt-4.1-mini",
+        input=full_prompt,
+        text={
+            "format": {
+                "type": "json_object"
+            }
+        },
+        temperature=0.2
     )
-    clean = response.text.replace("```json", "").replace("```", "").strip()
-    return json.loads(clean)
+
+    if not response.output_text:
+        raise ValueError("OpenAI returned an empty response.")
+
+    return json.loads(response.output_text)
 
 def save_memory(question, answer):
     global old_memory
@@ -645,12 +657,15 @@ def generate_summary(session_obj=None):
             history_text = session_obj.get_history_for_api()
         else:
             history_text = old_memory
-        response = client.models.generate_content(
-            model="gemini-3.5-flash-lite",
-            contents=SUMMARY_PROMPT + "\n" + history_text
+
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=SUMMARY_PROMPT + "\n" + history_text
         )
-        summary_text = response.text.strip()
+
+        summary_text = response.output_text.strip()
         return summary_text
+
     except Exception:
         return "No summary generated - API call failed."
 
@@ -756,7 +771,7 @@ def run_chat():
                     continue
         try:
             # FIXED: Send FULL history every time, not just last question
-            data = ask_gemini_with_full_history(session)
+            data = ask_openai_with_full_history(session)
             answer = data.get("answer", data.get("reply", "Sorry, I could not understand that. Please try again."))
             if data.get("is_emergency") is True or data.get("triage") == "EMERGENCY":
                 answer = misc["emergency"]
@@ -773,7 +788,7 @@ def run_chat():
         except Exception as error:
             error_text = str(error).lower()
             if "503" in error_text or "unavailable" in error_text:
-                msg = "Sorry, Gemini is busy right now. Please try again in a minute."
+                msg = "Sorry, I'm having a problem responding right now. Please try again in a minute."
                 print(f"MedIQ: {msg}")
                 session.add("MedIQ", msg)
             elif is_offline_error(error_text):
