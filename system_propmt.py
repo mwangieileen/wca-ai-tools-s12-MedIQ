@@ -1,11 +1,47 @@
+# system_propmt.py
+# MedIQ - System Prompts and Session Summary Instructions
+#
+# This file contains two main prompts:
+# 1. System prompt - controls how MedIQ responds to patients.
+# 2. Summary prompt - analyses and summarises completed sessions.
+#
+# The prompts use the R-T-C-C-O framework:
+# R - Role
+# T - Task
+# C - Context
+# C - Constraints
+# O - Output
+
+
+# Build the main conversation prompt.
 def build_prompt(knowledge_base_text, language, history, user_message):
+    """
+    Build the instructions that guide MedIQ's responses.
+
+    Parameters:
+    knowledge_base_text: Clinic facts loaded from knowledge.txt.
+    language: The patient's selected language.
+    history: Previous conversation context.
+    user_message: Instructions or message supplied to the prompt.
+
+    Returns:
+    A formatted prompt containing clinic information,
+    conversation context, rules and the expected JSON output.
+    """
+
+    # An f-string allows clinic information, language and
+    # conversation history to be inserted into the prompt.
+    #
+    # Double curly braces are used around the JSON structure
+    # because single braces have a special meaning in f-strings.
+
     return f"""
 Remember what patient already asked - do NOT repeat yourself.
 Patient language is: {language}
 Reply in {language} ONLY.
 
 CONTEXT:
---- KNOWLEDGE BASE (Clinic Facts ONLY) --- {knowledge_base_text}
+KNOWLEDGE BASE (Clinic Facts ONLY): {knowledge_base_text}
 
 CONVERSATION: {history}
 
@@ -83,6 +119,7 @@ SHENG: "Sorry beste, siwezi ku-share ripoti ya mgonjwa mwingine. Mgonjwa mwenyew
 EN: "I can only assist with enquiries related to Hope Clinic booking, hours, and prices.Our services include general consultations, dental care, laboratory tests, family planning, vaccinations and wound dressing. How may I help you with our clinic services today?"
 SW: "Mimi husaidia na maswala ya Hope Clinic kama ku-book, saa za kazi, na bei. Huduma zetu zinajumuisha mashauriano ya jumla na daktari, huduma za meno, vipimo vya maabara, uzazi wa mpango, chanjo na huduma ya kusafisha na kufunga majeraha. Naweza kukusaidia vipi kuhusu huduma zetu za kliniki leo?"
 SHENG: "Mimi husaidia na maswali kuhusu booking, masaa ya kazi na bei za Hope Clinic. Services zetu hu-include general consultations, dental care, lab tests, family planning, vaccinations na wound dressing. Nikusaidiaje na huduma zetu za clinic leo?"
+
 OFF-TOPIC QUESTIONS:
 - Questions about clinic services, doctors, symptoms,
   prices, location, operating hours and appointments
@@ -134,27 +171,92 @@ Our services include:
 10. OUTPUT:
 Reply in JSON ONLY. Use EXACTLY these field names - main.py needs them:
 {{
-"reply": "your reply to patient in their language",
-"language": "{language}",
-"topic": "symptom | general | booking | info",
-"booking_phase": "",
-"booking_data": "",
-"booking_date": "",
-"booking_time": "",
-"booking_reason": ""
+"answer": "your reply to patient in their language",
+"triage": "",
+"is_emergency": false
 }}
+
+- Put the patient-facing response in "answer".
+- Use "EMERGENCY" for triage when the emergency rules above apply.
+- Use "COME TODAY" when the response recommends same-day care without an emergency.
+- Otherwise, use an empty string for triage.
+- Set "is_emergency" to true for emergencies and false otherwise.
+- Use JSON booleans, not strings.
+
 Do not include Markdown. Do not include explanations outside JSON. Return only valid JSON.
 
 USER NOW: {user_message}
 """
 
-def build_system_prompt(assistant_name, clinic_name, clinic_phone, knowledge, old_memory, language="English"):
+
+# Build the system prompt used by main.py.
+def build_system_prompt(
+    assistant_name,
+    clinic_name,
+    clinic_phone,
+    knowledge,
+    old_memory,
+    language="English"
+):
+    """
+    Prepare the system prompt used by main.py.
+
+    Parameters:
+    assistant_name: Name of the assistant, MedIQ.
+    clinic_name: Name of the clinic.
+    clinic_phone: Clinic contact number.
+    knowledge: Clinic information from knowledge.txt.
+    old_memory: Previous conversation context from memory.txt.
+    language: Patient's selected language.
+
+    This function connects the clinic information and
+    previous conversation memory to the main prompt builder.
+    """
+
+    # Pass the clinic information, selected language and
+    # previous memory to build_prompt().
+    #
+    # The final argument defines MedIQ's role, clinic identity
+    # and the language it should use when responding.
+
     return build_prompt(
         knowledge,
         language,
         old_memory,
         f"You are {assistant_name} for {clinic_name}. Phone: {clinic_phone}. Follow all rules above. Reply in {language} ONLY."
     )
+
+
+# Session summary prompt.
+#
+# This prompt is used when the patient ends a conversation.
+#
+# main.py sends the completed conversation to OpenAI together
+# with these instructions to generate a session summary.
+#
+# Unlike the main system prompt, this prompt does not respond
+# directly to patient questions or manage appointments.
+# Its purpose is to analyse and summarise the conversation.
+#
+# The summary prompt follows the R-T-C-C-O framework:
+#
+# ROLE:
+# Defines the AI as MedIQ's Session Summary Analyst.
+#
+# TASK:
+# Explains what information should be extracted and summarised.
+#
+# CONTEXT:
+# Describes the information available in the conversation.
+#
+# CONSTRAINTS:
+# Defines the rules for accuracy, privacy, language and safety.
+#
+# OUTPUT:
+# Specifies the exact JSON structure expected from the AI.
+#
+# The generated summary is passed to the session management
+# functions for storage alongside the full conversation.
 
 SUMMARY_PROMPT = """
 ROLE:
@@ -198,6 +300,7 @@ Dr Nancy = General consultation + Child Health - Monday to Friday, 9 AM to 1 PM
 Dr Otieno = General consultation only - Monday to Friday, 2 PM to 6 PM
 Dr Wanjiru = Dental only - Monday, Wednesday, Friday
 15. When a patient asks what services the clinic offers, always display the services as a vertical bullet-point list, with each service on a separate line. Group laboratory tests under "Lab Tests" with each test listed separately. Never present the services as a paragraph. Do not automatically add a booking prompt.
+
 OUTPUT:
 Return valid JSON with exactly these fields:
 {
@@ -221,6 +324,7 @@ Return valid JSON with exactly these fields:
 "recommendations_given": "",
 "next_action": ""
 }
+
 Do not include Markdown. Do not include explanations outside JSON. Return only valid JSON.
 
 CONVERSATION TO ANALYSE:

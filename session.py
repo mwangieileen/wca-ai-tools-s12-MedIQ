@@ -25,9 +25,7 @@ SAMPLES_DIR = "samples"
 MEMORY_FILE = "memory.txt"
 
 
-# ---------------------------------------------------------
 # SESSION CLASS
-# ---------------------------------------------------------
 
 # A Session object represents one conversation between
 # the patient and MedIQ.
@@ -47,9 +45,7 @@ class Session:
         self.started_at = datetime.now()
 
 
-    # -----------------------------------------------------
     # MESSAGE STORAGE
-    # -----------------------------------------------------
 
     def add(self, role, text):
         """Add one patient or MedIQ message to the conversation."""
@@ -67,9 +63,7 @@ class Session:
         })
 
 
-    # -----------------------------------------------------
     # CONVERSATION HISTORY FOR OPENAI
-    # -----------------------------------------------------
 
     def get_history_for_api(self):
         """
@@ -107,9 +101,7 @@ class Session:
         return len(self.messages)
 
 
-    # -----------------------------------------------------
     # MARKDOWN SESSION FORMAT
-    # -----------------------------------------------------
 
     def to_markdown(self, summary=""):
         """Prepare the full conversation and summary in Markdown format."""
@@ -150,9 +142,7 @@ class Session:
         return "\n".join(lines)
 
 
-    # -----------------------------------------------------
     # STRUCTURED SESSION DATA
-    # -----------------------------------------------------
 
     def to_dict(self, summary=""):
         """Convert the session into a dictionary for JSON storage."""
@@ -171,9 +161,7 @@ class Session:
         }
 
 
-    # -----------------------------------------------------
     # SAVE COMPLETED SESSION
-    # -----------------------------------------------------
 
     def save(self, summary=""):
         """
@@ -221,10 +209,7 @@ class Session:
         # can identify where the session was saved.
         return md_path, json_path
 
-
-# ---------------------------------------------------------
 # RETRIEVE SAVED SESSIONS
-# ---------------------------------------------------------
 
 def list_saved_sessions():
     """List saved sessions for Menu Option 2 - Past session."""
@@ -243,11 +228,7 @@ def list_saved_sessions():
 
     return files
 
-
-# ---------------------------------------------------------
 # OPEN A PREVIOUS SESSION
-# ---------------------------------------------------------
-
 def load_saved_session(filename):
     """Read the contents of a selected past session."""
 
@@ -265,10 +246,7 @@ def load_saved_session(filename):
     except OSError:
         return None
 
-
-# ---------------------------------------------------------
 # PERSISTENT CONVERSATION MEMORY
-# ---------------------------------------------------------
 
 def save_to_memory_file(messages):
     """

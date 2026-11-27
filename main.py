@@ -307,7 +307,7 @@ def ask_openai_with_full_history(session_obj):
         CLINIC_NAME,
         CLINIC_PHONE,
         knowledge,
-        old_memory,
+        "No previous conversation.",
         selected_language
     )
 
@@ -424,9 +424,35 @@ def classify_service(message):
 
 # Identify booking requests using predefined phrases.
 def is_booking_request(message):
+    q = message.lower().strip().strip(".!?")
+    return bool(re.match(r"^(?:(?:actually|instead)[, ]+)?(?:i want to book|i would like to book|i'd like to book|book an appointment|make an appointment|schedule an appointment|can i book|i need an appointment|nataka ku-book|nataka appointment|ningependa kuweka appointment|book for me|book(?: me)?)(?:\b|$)", q))
+
+# Recognise questions and changes of intention before collecting booking fields.
+def is_booking_interruption(message):
+    q = message.lower().strip()
+    if is_booking_request(q) or is_greeting(q):
+        return True
+    if re.search(r"\b(gynae|gyn(e|ae)colog\w*|diagnos\w*|prescrib\w*|my (?:sister|brother|wife|husband|friend|mother|father)|dada yangu|ndugu yangu|rafiki yangu)\b", q):
+        return True
+    if re.match(r"^(?:what|where|when|why|how|who|which|can|could|do|does|is|are|would|should|actually|instead|i want|i need|i have|i feel|je|nini|wapi|bei|naweza|nataka|nina|iko wapi)\b", q):
+        return True
+    return "?" in q
+
+# Refuse third-party record requests before booking or cache processing.
+def is_private_record_request(message):
     q = message.lower()
-    booking_phrases = ["i want to book", "i would like to book", "i'd like to book", "book an appointment", "make an appointment", "schedule an appointment", "can i book", "i need an appointment", "nataka ku-book", "nataka appointment", "ningependa kuweka appointment", "book for me", "book", "booking"]
-    return any(phrase in q for phrase in booking_phrases)
+    other = r"\b(?:sister|brother|wife|husband|friend|mother|father|another patient|dada|ndugu|rafiki|mke|mume|mama|baba)\b"
+    record = r"\b(?:book\w*|appointment|record\w*|report\w*|result\w*|history|miadi|rekodi|ripoti|matokeo)\b"
+    return bool(re.search(other, q) and re.search(record, q) and not re.match(r"^(?:i want to book|can i book|book an appointment|nataka ku-book)\b", q))
+
+# Clear all temporary booking details and offers.
+def reset_booking():
+    global booking_state, booking_data, booking_offer_pending, booking_offer_service, last_service_hint
+    booking_state = None
+    booking_data = {}
+    booking_offer_pending = False
+    booking_offer_service = None
+    last_service_hint = None
 
 # Try supported date formats and return None if none match.
 def parse_appointment_date(message):
@@ -594,6 +620,8 @@ def handle_booking_message(message):
     # Collect the lab test name first if needed, then validate the appointment date.
     if booking_state == "ASK_DATE":
         if booking_data.get("service") == "Lab test" and "test" not in booking_data:
+            if not re.search(r"\b(?:malaria|blood sugar|sugar|typhoid|urine|sukari|mkojo)\b", q.lower()):
+                return bt["ask_date_lab"]
             booking_data["test"] = q
             return bt["ask_date"]
 
@@ -817,12 +845,8 @@ def run_chat():
     t = TEXT[selected_language]
     misc = MISC_TEXT[selected_language]
     # Create a session object to collect the conversation in the selected language.
+    reset_booking()
     session = Session(selected_language)
-    # Check connectivity before starting the conversation.
-    if not check_internet():
-        if not wait_for_internet():
-            print(f"MedIQ: {t['ended']}")
-            return
     print(f"\nMedIQ: {misc['how_help']}")
     # Record the opening assistant message in the session history.
     session.add("MedIQ", misc["how_help"])
@@ -844,9 +868,7 @@ def run_chat():
             # Save the full session and summary in Markdown and JSON files.
             try:
                 md_path, json_path = session.save(summary_text)
-                print(f"Session saved successfully:")
-                print(f"Markdown: {md_path}")
-                print(f"JSON: {json_path}")
+                # Session files are saved for internal review.
             except Exception as error:
                 print(f"Session saving failed: {error}")
 
@@ -857,30 +879,35 @@ def run_chat():
                 print(f"Memory saving failed: {error}")
 
             # Display session summary to the patient
-            print("\nMedIQ: Here is a summary of your session:")
-            print(summary_text)
+            # The summary is saved internally, not displayed to the patient.
 
             print(f"\nMedIQ: {t['ended']}")
             break
         
-        # Check connectivity again before processing the next message.
-        if not check_internet():
-            if not wait_for_internet():
-                print(f"MedIQ: {t['ended']}")
-                break
-            continue
         # Record the patient message before routing it to the appropriate handler.
         session.add("you", question)
         # Prioritise recognised emergency phrases over booking, cache and AI processing.
         if is_emergency(question):
-            booking_state = None
-            booking_data = {}
-            booking_offer_pending = False
+            reset_booking()
             print(f"MedIQ: {misc['emergency']}")
             session.add("MedIQ", misc["emergency"])
             print("-" * 50)
             continue
-        # Continue an active booking without sending the reply to the AI.
+        if is_private_record_request(question):
+            reset_booking()
+            answer = {
+                "English": "Sorry, I cannot share another patient's record.",
+                "Swahili": "Samahani, siwezi kushiriki rekodi ya mgonjwa mwingine, hata kwa ndugu au rafiki.",
+                "Sheng": "Sorry beste, siwezi ku-share rekodi ya mgonjwa mwingine."
+            }[selected_language]
+            print(f"MedIQ: {answer}")
+            session.add("MedIQ", answer)
+            print("-" * 50)
+            continue
+        # A new question ends the unfinished booking; never save it automatically.
+        if booking_state is not None and is_booking_interruption(question):
+            reset_booking()
+        # Continue an active booking only for replies to its current question.
         if booking_state is not None:
             answer = handle_booking_message(question)
             print(f"MedIQ: {answer}")
@@ -891,7 +918,7 @@ def run_chat():
         if classify_service(question) is not None:
             last_service_hint = classify_service(question)
         # Start a booking using the requested or most recently recognised service.
-        if is_booking_request(question):
+        if is_booking_request(question) and not re.search(r"\b(?:gynae|gyn(e|ae)colog\w*)\b", question.lower()):
             service = classify_service(question) or last_service_hint
             if not service:
                 service = "General consultation"
@@ -929,7 +956,8 @@ def run_chat():
         booking_offer_pending = False
         booking_offer_service = None
         # Check whether the question is eligible for caching and look for a saved answer.
-        if is_cacheable(question):
+        cache_allowed = is_cacheable(question) and not is_booking_interruption(question)
+        if cache_allowed:
             cached = get_cached(question)
             if cached:
                 # Support cached answers stored either as text or as a dictionary.
@@ -949,6 +977,11 @@ def run_chat():
                     save_memory(question, cached_answer)
                     print("-" * 50)
                     continue
+        # Check connectivity only when a fresh AI response is needed.
+        if not check_internet():
+            if not wait_for_internet():
+                print(f"MedIQ: {t['ended']}")
+                break
         # Request a fresh AI response when no earlier handler has answered.
         try:
             data = ask_openai_with_full_history(session)
@@ -956,6 +989,7 @@ def run_chat():
             answer = data.get("answer", data.get("reply", "Sorry, I could not understand that. Please try again."))
             # Replace the AI answer with emergency guidance if emergency flags are returned.
             if data.get("is_emergency") is True or data.get("triage") == "EMERGENCY":
+                reset_booking()
                 answer = misc["emergency"]
             print(f"MedIQ: {answer}")
             session.add("MedIQ", answer)
@@ -966,7 +1000,7 @@ def run_chat():
                 booking_offer_service = "General consultation"
             # Exclude emergency and COME TODAY responses from this cache and memory write.
             if data.get("is_emergency") is not True and data.get("triage") not in ["EMERGENCY", "COME TODAY"]:
-                if is_cacheable(question):
+                if cache_allowed:
                     set_cache(question, answer)
                 save_memory(question, answer)
         # Handle API and connectivity failures without exposing raw errors to the patient.
