@@ -111,6 +111,7 @@ Follow the instructions displayed to start interacting with MedIQ.
 
 - Evonah Ombiro
 - Eileen Mwangi
+- Shadrack Opiyo
 
 ## Disclaimer
 
