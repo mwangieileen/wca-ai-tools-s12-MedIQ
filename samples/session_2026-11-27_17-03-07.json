@@ -1,0 +1,102 @@
+{
+    "tool": "MedIQ",
+    "clinic": "Hope Clinic",
+    "date": "2026-11-27 17:03:07",
+    "language": "English",
+    "total_turns": 23,
+    "conversation": [
+        {
+            "role": "MedIQ",
+            "text": "How may I help you today?"
+        },
+        {
+            "role": "you",
+            "text": "What services do you offer?"
+        },
+        {
+            "role": "MedIQ",
+            "text": "We offer the following services:\n- General Consultation\n- Dental Checkup\n- Dental Cleaning\n- Lab Tests:\n  - Malaria Test\n  - Blood Sugar Test\n  - Typhoid Test\n  - Urine Test\n- Child Vaccination\n- Family Planning\n- Wound Dressing\n- Home Visits"
+        },
+        {
+            "role": "you",
+            "text": "Where are you located?"
+        },
+        {
+            "role": "MedIQ",
+            "text": "We are located in Westlands, Nairobi, next to Naivas Supermarket on the 2nd Floor. Open Mon-Fri 8AM-6PM, Sat 9AM-2PM, closed Sunday. Do you want to book?"
+        },
+        {
+            "role": "you",
+            "text": "Yes, I would like to book a general consultation."
+        },
+        {
+            "role": "MedIQ",
+            "text": "Do you have a preferred doctor?\nDr Nancy (Monday-Friday, 9 AM-1 PM), Dr Otieno (Monday-Friday, 2 PM-6 PM), or no preference?"
+        },
+        {
+            "role": "you",
+            "text": "Dr Nancy, please"
+        },
+        {
+            "role": "MedIQ",
+            "text": "What date would you prefer? Please use DD/MM/YYYY."
+        },
+        {
+            "role": "you",
+            "text": "01/12/2026"
+        },
+        {
+            "role": "MedIQ",
+            "text": "What time would you prefer? For example, 10:00 AM."
+        },
+        {
+            "role": "you",
+            "text": "10:00 AM"
+        },
+        {
+            "role": "MedIQ",
+            "text": "Thank you. May I have the patient's full name?"
+        },
+        {
+            "role": "you",
+            "text": "Jane Doe"
+        },
+        {
+            "role": "MedIQ",
+            "text": "Thank you. What phone number can the clinic use to contact you?"
+        },
+        {
+            "role": "you",
+            "text": "0700000000"
+        },
+        {
+            "role": "MedIQ",
+            "text": "Please review your appointment request:\n\nName: Jane Doe\nPhone: 0700000000\nService: General consultation\nDoctor: Dr Nancy\nDate: 2026-12-01\nTime: 10:00 AM\n\nWould you like me to submit this request? Please reply YES or NO."
+        },
+        {
+            "role": "you",
+            "text": "Yes"
+        },
+        {
+            "role": "MedIQ",
+            "text": "Your appointment has been successfully confirmed!\n\nAppointment ID: HHC-11ADA104\nName: Jane Doe\nService: General consultation\nHealthcare provider: Dr Nancy\nDate: 01 December 2026\nTime: 10:00 AM\n\nPlease arrive at least 15 minutes before your appointment.\nWe look forward to seeing you at Hope Clinic!"
+        },
+        {
+            "role": "you",
+            "text": "Which doctor did I choose and what date is my appointment?"
+        },
+        {
+            "role": "MedIQ",
+            "text": "You chose Dr Nancy for your general consultation on 01 December 2026 at 10:00 AM. Do you want to book another appointment or need more info?"
+        },
+        {
+            "role": "you",
+            "text": "No, thank you. That's all."
+        },
+        {
+            "role": "MedIQ",
+            "text": "Thank you! If you need help later, just reach out. Have a good day!"
+        }
+    ],
+    "summary": "{\n  \"session_date\": \"\",\n  \"patient_name\": \"Jane Doe\",\n  \"phone\": \"0700000000\",\n  \"language\": \"English\",\n  \"main_reason\": \"General consultation booking\",\n  \"symptoms\": [],\n  \"service_requested\": \"General consultation\",\n  \"doctor_preference\": \"Dr Nancy\",\n  \"date_preference\": \"01/12/2026\",\n  \"time_preference\": \"10:00 AM\",\n  \"booking_details\": \"Appointment confirmed with Dr Nancy on 01 December 2026 at 10:00 AM, Appointment ID: HHC-11ADA104\",\n  \"clinic_info_given\": \"Located in Westlands, Nairobi, next to Naivas Supermarket on the 2nd Floor. Open Mon-Fri 8AM-6PM, Sat 9AM-2PM, closed Sunday.\",\n  \"emergency_signs\": \"\",\n  \"patient_feedback\": \"No further questions, thanked and ended session.\",\n  \"important_preferences\": \"Preferred doctor is Dr Nancy; preferred date and time are 01/12/2026 at 10:00 AM.\",\n  \"unresolved_questions\": \"\",\n  \"safety_notes\": \"Advised to arrive at least 15 minutes before appointment time.\",\n  \"recommendations_given\": \"Provided clinic services list and location details.\",\n  \"next_action\": \"Patient to attend the general consultation appointment with Dr Nancy on 01 December 2026 at 10:00 AM.\"\n}"
+}

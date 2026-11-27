@@ -4,3 +4,13 @@ __pycache__/
 booking.json
 memory.json
 memory.txt
+
+# Local application data
+bookings.json
+cache.json
+Sessions/
+venv/
+# Keep only the selected demonstration session
+samples/*
+!samples/session_2026-11-27_17-03-07.json
+!samples/session_2026-11-27_17-03-07.md

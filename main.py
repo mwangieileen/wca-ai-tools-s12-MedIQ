@@ -230,7 +230,7 @@ MISC_TEXT = {
 
 def check_internet():
     try:
-        socket.create_connection(("8.8.8.8", 53), timeout=2)
+        socket.create_connection(("api.openai.com", 443), timeout=5)
         return True
     except OSError:
         return False
@@ -641,15 +641,55 @@ def show_past_session():
         print("Invalid choice.")
     print("-" * 50)
 
+
 def view_bookings():
-    print("\n--- View Bookings ---")
+    print("\n--- Find Your Booking ---")
+
+    patient_name = input(
+        "Please enter the full name used when making the booking: "
+    ).strip()
+
+    if not patient_name:
+        print("Please enter your full name.")
+        return
+
     bookings = load_bookings()
-    if not bookings:
-        print("No bookings found.")
-    else:
-        for b in bookings:
-            print(f"{b.get('booking_id', '')} | {b.get('name', '')} | {b.get('service', '')} | {b.get('doctor', '')} | {b.get('date', '')} {b.get('time', '')} | {b.get('phone', '')} | {b.get('status', '')}")
+
+    # Find only bookings belonging to this patient
+    patient_bookings = [
+        booking for booking in bookings
+        if booking.get("name", "").strip().casefold() == patient_name.casefold()
+    ]
+
+    if not patient_bookings:
+        print(f"No bookings found under the name {patient_name}.")
+        return
+
+    print(f"\nBookings found for {patient_name}:")
+
+    for booking in patient_bookings:
+        print("-" * 50)
+        print(f"Appointment ID: {booking.get('booking_id', '')}")
+        print(f"Name: {booking.get('name', '')}")
+        print(f"Service: {booking.get('service', '')}")
+        print(f"Doctor: {booking.get('doctor', '')}")
+        print(f"Date: {booking.get('date', '')}")
+        print(f"Time: {booking.get('time', '')}")
+        appointment_date = date.fromisoformat(booking["date"])
+        today = date.today()
+
+        if booking.get("status") != "CONFIRMED":
+            status = "Booking Confirmed"
+        elif appointment_date > today:
+            status = "Awaiting appointment"
+        elif appointment_date == today:
+            status = "Waiting to be seen"
+        else:
+            status = "Appointment date passed"
+
+        print(f"Status: {status}")
     print("-" * 50)
+
 
 def generate_summary(session_obj=None):
     try:
@@ -685,14 +725,20 @@ def run_chat():
         question = input("you: ").strip()
         if question.lower() == "exit":
             summary_text = generate_summary(session)
+
             try:
                 md_path, json_path = session.save(summary_text)
-            except Exception:
-                pass
+                print(f"Session saved successfully:")
+                print(f"Markdown: {md_path}")
+                print(f"JSON: {json_path}")
+            except Exception as error:
+                print(f"Session saving failed: {error}")
+
             try:
                 save_to_memory_file(session.messages)
-            except Exception:
-                pass
+            except Exception as error:
+                print(f"Memory saving failed: {error}")
+
             print(f"MedIQ: {t['ended']}")
             break
         if not question:

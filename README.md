@@ -1,10 +1,10 @@
 # wca-ai-tools-s12-MedIQ
 
-## About the Project
+# About the Project
 
-MedIQ is a Clinic FAQ Assistant developed using Python and Google's Gemini API.
+MedIQ is a Clinic FAQ Assistant developed using Python and OpenAI's API.
 
-The assistant answers patients' questions about a small clinic, including:
+The assistant helps patients access information about a clinic, including:
 
 - Clinic opening hours
 - Available services
@@ -21,13 +21,14 @@ During a session, MedIQ remembers what the patient has already asked to avoid re
 - Assists patients with appointment booking.
 - Identifies potential medical emergencies and provides appropriate guidance.
 - Saves conversation sessions and summaries.
+- Uses OpenAI to generate conversational responses.
 
 ## Requirements
 
 Before running MedIQ, you need:
 
 - Python installed on your computer.
-- A Google Gemini API key.
+- An OpenAI API key.
 - Git installed on your computer.
 
 ## Installation and Setup
@@ -35,69 +36,82 @@ Before running MedIQ, you need:
 ### 1. Clone the repository
 
 Open your terminal and run:
-  
-    git clone YOUR_GITHUB_REPOSITORY_URL
+
+```bash
+git clone YOUR_GITHUB_REPOSITORY_URL
+```
 
 Navigate into the downloaded project folder:
 
-    cd wca-ai-tools-s12-MedIQ
+```bash
+cd wca-ai-tools-s12-MedIQ
+```
 
 ### 2. Create a virtual environment
 
-    python -m venv venv
+```bash
+python -m venv venv
+```
 
 Activate the virtual environment.
 
-    **Windows:**
+**Windows:**
 
-        venv\Scripts\activate
+```bash
+venv\Scripts\activate
+```
 
+**macOS/Linux:**
 
-    **macOS/Linux:**
-
-        source venv/bin/activate
-
+```bash
+source venv/bin/activate
+```
 
 ### 3. Install the required packages
 
+```bash
 pip install -r requirements.txt
+```
 
-### 4. Configure your Gemini API key
+### 4. Configure your OpenAI API key
 
-MedIQ uses Google's Gemini API to generate responses.
+MedIQ uses OpenAI's API to generate responses.
 
-1. Visit [Google AI Studio](https://aistudio.google.com/).
-2. Sign in and create your own API key.
+1. Visit [OpenAI Platform](https://platform.openai.com/).
+2. Sign in and create an API key.
 3. In the main project folder, create a file named `.env`.
 4. Add your API key in the following format:
 
-GEMINI_API_KEY='your_api_key_here'
+```env
+OPENAI_API_KEY='your_api_key_here'
+```
 
-Replace `your_api_key_here` with your actual API key.
+Replace '`your_api_key_here`' with your actual API key.
 
-**Note:** Keep your API key private. Do not share even to GitHub.
+**Note:** Kindly keep your API key private. Never share it or upload your `.env` file to GitHub.
 
 ### 5. Run MedIQ
 
 In your terminal, run:
 
+```bash
 python main.py
-
+```
 
 Follow the instructions displayed to start interacting with MedIQ.
 
 ## Technologies Used
 
 - Python
-- Google Gemini API
+- OpenAI API (GPT-4.1-mini)
 - JSON
 - python-dotenv
 
 ## Developers
 
-**Name:**   Evone
-            Eileen
+- Evonah Ombiro
+- Eileen Mwangi
 
 ## Disclaimer
 
-MedIQ is an informational clinic assistance tool. It does not diagnose medical conditions or replace professional medical advice. Patients experiencing emergencies should seek immediate medical attention.
+MedIQ is an informational clinic assistance tool. It does not diagnose medical conditions or replace professional medical advice. Patients experiencing emergencies are expected to seek immediate medical attention.

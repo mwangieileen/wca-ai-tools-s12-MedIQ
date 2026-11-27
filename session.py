@@ -86,8 +86,7 @@ class Session:
         Example: samples/session_2026-11-23_11-30.md
         """
         os.makedirs(SAMPLES_DIR, exist_ok=True)
-        filename_base = self.started_at.strftime("session_%Y-%m-%d_%H-%M")
-
+        filename_base = self.started_at.strftime("session_%Y-%m-%d_%H-%M-%S")
         # 1. .md file
         md_path = os.path.join(SAMPLES_DIR, filename_base + ".md")
         with open(md_path, "w", encoding="utf-8") as f:
