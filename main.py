@@ -723,6 +723,12 @@ def run_chat():
     print("-" * 50)
     while True:
         question = input("you: ").strip()
+
+        if not question:
+            print("MedIQ: Please type something so I can assist you.")
+            print("-" * 50)
+            continue
+
         if question.lower() == "exit":
             summary_text = generate_summary(session)
 
@@ -739,8 +745,13 @@ def run_chat():
             except Exception as error:
                 print(f"Memory saving failed: {error}")
 
-            print(f"MedIQ: {t['ended']}")
+            # Display session summary to the patient
+            print("\nMedIQ: Here is a summary of your session:")
+            print(summary_text)
+
+            print(f"\nMedIQ: {t['ended']}")
             break
+        
         if not question:
             continue
         if not check_internet():
