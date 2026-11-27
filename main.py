@@ -827,7 +827,6 @@ def run_chat():
                     print("-" * 50)
                     continue
         try:
-            # FIXED: Send FULL history every time, not just last question
             data = ask_openai_with_full_history(session)
             answer = data.get("answer", data.get("reply", "Sorry, I could not understand that. Please try again."))
             if data.get("is_emergency") is True or data.get("triage") == "EMERGENCY":
@@ -845,6 +844,11 @@ def run_chat():
         except Exception as error:
             error_text = str(error).lower()
             if "503" in error_text or "unavailable" in error_text:
+        #except Exception as error:
+            #print(f"DEBUG ERROR: {type(error).__name__}: {error}")
+            #error_text = str(error).lower()
+            #if "503" in error_text or "unavailable" in error_text:
+
                 msg = "Sorry, I'm having a problem responding right now. Please try again in a minute."
                 print(f"MedIQ: {msg}")
                 session.add("MedIQ", msg)
